@@ -30,10 +30,13 @@ export interface ProductCategoryRow {
 
 export type OrderStatus =
   | 'pending'
+  | 'awaiting_payment'
   | 'confirmed'
   | 'delivering'
   | 'delivered'
   | 'cancelled'
+
+export type OrderPaymentMethod = 'cod' | 'click'
 
 export interface ProductRow {
   id: string
@@ -79,6 +82,12 @@ export interface OrderRow {
   phone: string
   full_name: string
   note: string | null
+  delivery_region?: string | null
+  payment_method?: OrderPaymentMethod | null
+  coupon_code?: string | null
+  subtotal?: number | null
+  shipping_cost?: number | null
+  discount_total?: number | null
   created_at: string | null
 }
 
@@ -105,4 +114,25 @@ export interface PromotionRow {
   image_url: string | null
   created_at: string | null
   created_by: string | null
+}
+
+export type CouponType = 'percent' | 'fixed'
+
+export interface CouponRow {
+  code: string
+  type: CouponType
+  value: number
+  min_subtotal: number
+  max_uses: number | null
+  used_count: number
+  expires_at: string | null
+  active: boolean
+  created_at: string | null
+}
+
+export interface AppSettingRow {
+  key: string
+  value: unknown
+  updated_at: string | null
+  updated_by: string | null
 }

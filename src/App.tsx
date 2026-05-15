@@ -9,6 +9,8 @@ import AnalitikaPage from './pages/AnalitikaPage'
 import MahsulotlarPage from './pages/MahsulotlarPage'
 import TurkumlarPage from './pages/TurkumlarPage'
 import AksiyalarPage from './pages/AksiyalarPage'
+import KuponlarPage from './pages/KuponlarPage'
+import PochtaNarxiPage from './pages/PochtaNarxiPage'
 import OmborPage from './pages/OmborPage'
 import BuyurtmalarPage from './pages/BuyurtmalarPage'
 import SotuvlarPage from './pages/SotuvlarPage'
@@ -25,6 +27,8 @@ function AdminRoutes() {
         <Route path="/mahsulotlar" element={<MahsulotlarPage />} />
         <Route path="/turkum-wa-bolim" element={<TurkumlarPage />} />
         <Route path="/aksiyalar" element={<AksiyalarPage />} />
+        <Route path="/kuponlar" element={<KuponlarPage />} />
+        <Route path="/pochta-narxi" element={<PochtaNarxiPage />} />
         <Route path="/ombor" element={<OmborPage />} />
         <Route path="/buyurtmalar" element={<BuyurtmalarPage />} />
         <Route path="/sotuvlar" element={<SotuvlarPage />} />

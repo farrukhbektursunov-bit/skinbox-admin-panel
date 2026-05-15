@@ -1,56 +1,132 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
+import {
+  Banknote,
+  ChevronDown,
+  ChevronUp,
+  CreditCard,
+  MapPin,
+  Phone,
+  RefreshCw,
+  ShoppingBag,
+  StickyNote,
+  Tag,
+  User,
+} from 'lucide-react'
 import { Card, CardSubtitle, CardTitle } from '../components/ui/Card'
 import { supabase } from '../lib/supabase'
-import type { OrderRow, OrderStatus } from '../types/database.types'
+import type { OrderPaymentMethod, OrderRow, OrderStatus } from '../types/database.types'
 
-const STATUSES: { value: OrderStatus; label: string }[] = [
-  { value: 'pending', label: 'Kutilmoqda' },
-  { value: 'confirmed', label: 'Tasdiqlangan' },
-  { value: 'delivering', label: 'Yetkazilmoqda' },
-  { value: 'delivered', label: 'Yetkazilgan' },
-  { value: 'cancelled', label: 'Bekor' },
-]
-
-function formatMoney(n: number) {
-  return new Intl.NumberFormat('uz-UZ').format(n) + ' so‘m'
+interface OrderItem {
+  product_id?: string | null
+  product_name?: string | null
+  name?: string | null
+  image?: string | null
+  quantity?: number | string | null
+  price?: number | string | null
 }
 
-function itemsPreview(items: unknown): string {
-  if (items == null) return '—'
-  if (Array.isArray(items)) {
-    return items
-      .map((it) => {
-        if (it && typeof it === 'object' && 'product_name' in it)
-          return String((it as { product_name?: string }).product_name ?? '')
-        if (it && typeof it === 'object' && 'name' in it)
-          return String((it as { name?: string }).name ?? '')
-        return JSON.stringify(it)
-      })
-      .filter(Boolean)
-      .join(', ')
+const STATUSES: { value: OrderStatus; label: string; emoji: string; className: string }[] = [
+  {
+    value: 'pending',
+    label: 'Kutilmoqda',
+    emoji: '⏳',
+    className: 'bg-amber-50 text-amber-800 ring-amber-200',
+  },
+  {
+    value: 'awaiting_payment',
+    label: 'To‘lov kutilmoqda',
+    emoji: '💳',
+    className: 'bg-sky-50 text-sky-800 ring-sky-200',
+  },
+  {
+    value: 'confirmed',
+    label: 'Tasdiqlangan',
+    emoji: '✅',
+    className: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+  },
+  {
+    value: 'delivering',
+    label: 'Yetkazilmoqda',
+    emoji: '🚚',
+    className: 'bg-indigo-50 text-indigo-800 ring-indigo-200',
+  },
+  {
+    value: 'delivered',
+    label: 'Yetkazilgan',
+    emoji: '📦',
+    className: 'bg-violet-50 text-violet-800 ring-violet-200',
+  },
+  {
+    value: 'cancelled',
+    label: 'Bekor',
+    emoji: '❌',
+    className: 'bg-rose-50 text-rose-800 ring-rose-200',
+  },
+]
+
+const STATUS_MAP = new Map(STATUSES.map((s) => [s.value, s]))
+
+const FILTERS: { value: OrderStatus | 'all'; label: string }[] = [
+  { value: 'all', label: 'Barchasi' },
+  ...STATUSES.map((s) => ({ value: s.value, label: s.label })),
+]
+
+const PAYMENT_LABELS: Record<OrderPaymentMethod, { label: string; emoji: string }> = {
+  cod: { label: 'Naqd — yetkazib berishda', emoji: '💵' },
+  click: { label: 'Click (online)', emoji: '💳' },
+}
+
+function formatMoney(n: number) {
+  return new Intl.NumberFormat('uz-UZ').format(Math.round(n)) + ' so‘m'
+}
+
+function shortOrderId(id: string) {
+  return id.slice(0, 8).toUpperCase()
+}
+
+function paymentInfo(o: OrderRow) {
+  if (o.payment_method && PAYMENT_LABELS[o.payment_method]) {
+    return PAYMENT_LABELS[o.payment_method]
   }
-  try {
-    return JSON.stringify(items)
-  } catch {
-    return String(items)
+  if (o.status === 'awaiting_payment') return PAYMENT_LABELS.click
+  return PAYMENT_LABELS.cod
+}
+
+function parseItems(raw: unknown): OrderItem[] {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw as OrderItem[]
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? (parsed as OrderItem[]) : []
+    } catch {
+      return []
+    }
   }
+  return []
 }
 
 export default function BuyurtmalarPage() {
   const [rows, setRows] = useState<OrderRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all')
+  const [search, setSearch] = useState('')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!supabase) return
-    setLoading(true)
+    if (opts?.silent) setRefreshing(true)
+    else setLoading(true)
     setError(null)
     const { data, error: e } = await supabase
       .from('orders')
       .select('*')
       .order('created_at', { ascending: false })
-    setLoading(false)
+    if (opts?.silent) setRefreshing(false)
+    else setLoading(false)
     if (e) {
       setError(e.message)
       return
@@ -69,7 +145,36 @@ export default function BuyurtmalarPage() {
       setError(e.message)
       return
     }
-    void load()
+    void load({ silent: true })
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return rows.filter((o) => {
+      if (statusFilter !== 'all' && o.status !== statusFilter) return false
+      if (!q) return true
+      const hay = [
+        shortOrderId(o.id),
+        o.full_name,
+        o.phone,
+        o.address,
+        o.delivery_region ?? '',
+        o.note ?? '',
+        o.coupon_code ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
+  }, [rows, statusFilter, search])
+
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   return (
@@ -79,9 +184,27 @@ export default function BuyurtmalarPage() {
           <div className="text-xl font-bold">Buyurtmalar</div>
           <div className="mt-1 text-sm text-gray-500">
             Jami:{' '}
-            <span className="font-semibold">{loading ? '…' : `${rows.length} ta`}</span>
+            <span className="font-semibold text-gray-700">
+              {loading ? '…' : `${rows.length} ta`}
+            </span>
+            {statusFilter !== 'all' && !loading ? (
+              <>
+                {' '}
+                · Filtr bo‘yicha:{' '}
+                <span className="font-semibold text-gray-700">{filtered.length} ta</span>
+              </>
+            ) : null}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => void load({ silent: true })}
+          disabled={loading || refreshing}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-gray-700 ring-1 ring-black/10 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          Yangilash
+        </button>
       </div>
 
       {error && (
@@ -91,68 +214,268 @@ export default function BuyurtmalarPage() {
       )}
 
       <Card>
-        <CardTitle>Ro‘yxat</CardTitle>
-        <CardSubtitle>Supabase `orders` — admin RLS kerak</CardSubtitle>
-        <div className="mt-4 overflow-x-auto">
-          {loading ? (
-            <div className="rounded-2xl bg-gray-50 p-6 text-sm text-gray-600">Yuklanmoqda…</div>
-          ) : rows.length === 0 ? (
-            <div className="rounded-2xl bg-gray-50 p-6 text-sm text-gray-600">
-              Buyurtma yo‘q.
-            </div>
-          ) : (
-            <table className="w-full min-w-[900px] border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 text-xs font-medium text-gray-500">
-                  <th className="py-2 pr-2">Sana</th>
-                  <th className="py-2 pr-2">Mijoz</th>
-                  <th className="py-2 pr-2">Telefon</th>
-                  <th className="py-2 pr-2">Mahsulotlar</th>
-                  <th className="py-2 pr-2">Jami</th>
-                  <th className="py-2 pr-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((o) => (
-                  <tr key={o.id} className="border-b border-gray-100 align-top">
-                    <td className="py-3 pr-2 whitespace-nowrap text-gray-600">
-                      {o.created_at
-                        ? format(new Date(o.created_at), 'dd.MM.yyyy HH:mm')
-                        : '—'}
-                    </td>
-                    <td className="py-3 pr-2">
-                      <div className="font-medium text-gray-900">{o.full_name}</div>
-                      <div className="mt-0.5 max-w-[200px] text-xs text-gray-500">
-                        {o.address}
-                      </div>
-                    </td>
-                    <td className="py-3 pr-2 text-gray-700">{o.phone}</td>
-                    <td className="py-3 pr-2 max-w-[240px] text-xs text-gray-600">
-                      {itemsPreview(o.items)}
-                    </td>
-                    <td className="py-3 pr-2 font-medium text-gray-900">
-                      {formatMoney(Number(o.total))}
-                    </td>
-                    <td className="py-3 pr-2">
-                      <select
-                        value={o.status}
-                        onChange={(e) => void setStatus(o.id, e.target.value as OrderStatus)}
-                        className="h-9 max-w-[160px] rounded-lg border border-gray-200 bg-white px-2 text-xs"
-                      >
-                        {STATUSES.map((s) => (
-                          <option key={s.value} value={s.value}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {FILTERS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setStatusFilter(f.value)}
+                className={
+                  statusFilter === f.value
+                    ? 'rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white'
+                    : 'rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200'
+                }
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Qidirish: #ID, ism, telefon, manzil…"
+            className="h-9 w-full max-w-[280px] rounded-lg border border-gray-200 bg-white px-3 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none"
+          />
         </div>
       </Card>
+
+      {loading ? (
+        <Card>
+          <div className="rounded-2xl bg-gray-50 p-6 text-sm text-gray-600">
+            Yuklanmoqda…
+          </div>
+        </Card>
+      ) : filtered.length === 0 ? (
+        <Card>
+          <CardTitle>Buyurtma yo‘q</CardTitle>
+          <CardSubtitle>
+            {rows.length === 0
+              ? 'Hozircha hech qanday buyurtma yo‘q.'
+              : 'Filtr bo‘yicha mos buyurtma topilmadi.'}
+          </CardSubtitle>
+        </Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {filtered.map((o) => (
+            <OrderCard
+              key={o.id}
+              order={o}
+              expanded={expanded.has(o.id)}
+              onToggle={() => toggleExpanded(o.id)}
+              onStatusChange={(s) => void setStatus(o.id, s)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OrderCard({
+  order,
+  expanded,
+  onToggle,
+  onStatusChange,
+}: {
+  order: OrderRow
+  expanded: boolean
+  onToggle: () => void
+  onStatusChange: (s: OrderStatus) => void
+}) {
+  const items = useMemo(() => parseItems(order.items), [order.items])
+  const status = STATUS_MAP.get(order.status) ?? STATUSES[0]
+  const pay = paymentInfo(order)
+  const dt = order.created_at ? new Date(order.created_at) : null
+
+  return (
+    <Card className="!p-0 overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-3">
+        <div className="flex items-center gap-2 text-sm">
+          <ShoppingBag className="h-4 w-4 text-gray-500" />
+          <span className="font-bold text-gray-900">
+            BUYURTMA #{shortOrderId(order.id)}
+          </span>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${status.className}`}
+        >
+          <span>{status.emoji}</span>
+          <span>{status.label}</span>
+        </span>
+      </div>
+
+      <div className="space-y-2.5 px-5 py-4 text-sm">
+        <Line icon={<User className="h-4 w-4" />} label="Mijoz">
+          <span className="font-medium text-gray-900">{order.full_name || '—'}</span>
+        </Line>
+        <Line icon={<Phone className="h-4 w-4" />} label="Telefon">
+          <a href={`tel:${order.phone}`} className="text-gray-800 hover:underline">
+            {order.phone || '—'}
+          </a>
+        </Line>
+        <Line icon={<MapPin className="h-4 w-4" />} label="Manzil">
+          <span className="text-gray-800">
+            {order.delivery_region ? (
+              <span className="mr-1 inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-700">
+                {order.delivery_region}
+              </span>
+            ) : null}
+            {order.address || '—'}
+          </span>
+        </Line>
+        {order.note ? (
+          <Line icon={<StickyNote className="h-4 w-4" />} label="Izoh">
+            <span className="text-gray-700">{order.note}</span>
+          </Line>
+        ) : null}
+      </div>
+
+      <div className="border-t border-gray-100 px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            🧾 Mahsulotlar
+          </div>
+          {items.length > 2 ? (
+            <button
+              type="button"
+              onClick={onToggle}
+              className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900"
+            >
+              {expanded ? (
+                <>
+                  Kamroq <ChevronUp className="h-3.5 w-3.5" />
+                </>
+              ) : (
+                <>
+                  Hammasi ({items.length}) <ChevronDown className="h-3.5 w-3.5" />
+                </>
+              )}
+            </button>
+          ) : null}
+        </div>
+        <ul className="mt-2 space-y-1.5 text-sm">
+          {(expanded ? items : items.slice(0, 2)).map((it, idx) => {
+            const qty = Number(it.quantity ?? 1) || 1
+            const price = Number(it.price ?? 0) || 0
+            const name = it.product_name || it.name || 'Mahsulot'
+            return (
+              <li
+                key={`${order.id}-${idx}`}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="text-gray-800">
+                  • {name} <span className="text-gray-500">x{qty}</span>
+                </span>
+                <span className="font-medium text-gray-900">
+                  {formatMoney(price * qty)}
+                </span>
+              </li>
+            )
+          })}
+          {items.length === 0 ? (
+            <li className="text-xs text-gray-500">— Mahsulot ma’lumoti yo‘q</li>
+          ) : null}
+        </ul>
+      </div>
+
+      <div className="space-y-2.5 border-t border-gray-100 bg-gray-50/60 px-5 py-4 text-sm">
+        <Line
+          icon={
+            order.payment_method === 'click' ? (
+              <CreditCard className="h-4 w-4" />
+            ) : (
+              <Banknote className="h-4 w-4" />
+            )
+          }
+          label="To‘lov usuli"
+        >
+          <span className="text-gray-800">
+            {pay.emoji} {pay.label}
+          </span>
+        </Line>
+        {order.coupon_code ? (
+          <Line icon={<Tag className="h-4 w-4" />} label="Kupon">
+            <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200">
+              {order.coupon_code}
+            </span>
+          </Line>
+        ) : null}
+        {typeof order.subtotal === 'number' && order.subtotal > 0 ? (
+          <SmallRow label="Mahsulotlar">{formatMoney(Number(order.subtotal))}</SmallRow>
+        ) : null}
+        {typeof order.shipping_cost === 'number' && order.shipping_cost > 0 ? (
+          <SmallRow label="Yetkazib berish">
+            {formatMoney(Number(order.shipping_cost))}
+          </SmallRow>
+        ) : null}
+        {typeof order.discount_total === 'number' && order.discount_total > 0 ? (
+          <SmallRow label="Chegirma">
+            <span className="text-rose-600">
+              −{formatMoney(Number(order.discount_total))}
+            </span>
+          </SmallRow>
+        ) : null}
+        <div className="flex items-center justify-between border-t border-gray-200 pt-2 text-base">
+          <span className="font-semibold text-gray-900">💰 Jami</span>
+          <span className="text-lg font-bold text-gray-900">
+            {formatMoney(Number(order.total ?? 0))}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-5 py-3">
+        <div className="text-xs text-gray-500">
+          🕐 {dt ? format(dt, 'dd.MM.yyyy HH:mm') : '—'}
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500">Statusni o‘zgartirish:</label>
+          <select
+            value={order.status}
+            onChange={(e) => onStatusChange(e.target.value as OrderStatus)}
+            className="h-8 max-w-[180px] rounded-lg border border-gray-200 bg-white px-2 text-xs"
+          >
+            {STATUSES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.emoji} {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function Line({
+  icon,
+  label,
+  children,
+}: {
+  icon: React.ReactNode
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-gray-500">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+          {label}
+        </div>
+        <div className="mt-0.5 break-words">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+function SmallRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between text-xs text-gray-600">
+      <span>{label}</span>
+      <span className="font-medium text-gray-800">{children}</span>
     </div>
   )
 }
