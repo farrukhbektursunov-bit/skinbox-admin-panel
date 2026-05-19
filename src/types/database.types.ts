@@ -53,6 +53,8 @@ export interface ProductRow {
   stock_quantity: number | null
   sold_count: number | null
   images: string[] | null
+  is_import_on_order?: boolean | null
+  estimated_delivery_days?: number | null
   created_at: string | null
 }
 
@@ -88,6 +90,10 @@ export interface OrderRow {
   subtotal?: number | null
   shipping_cost?: number | null
   discount_total?: number | null
+  tracking_number?: string | null
+  tracking_url?: string | null
+  carrier?: string | null
+  estimated_delivery_at?: string | null
   created_at: string | null
 }
 
@@ -100,6 +106,20 @@ export interface ProfileRow {
   birth_date: string | null
   gender: 'male' | 'female' | null
   role: 'user' | 'admin' | null
+}
+
+export type UserNotificationType = 'order' | 'message' | 'promotion' | 'general'
+
+export interface UserNotificationRow {
+  id: string
+  user_id: string
+  title: string
+  body: string
+  type: UserNotificationType
+  order_id: string | null
+  read_at: string | null
+  created_at: string | null
+  created_by: string | null
 }
 
 export interface PromotionRow {

@@ -6,6 +6,7 @@ import {
   ChevronUp,
   CreditCard,
   MapPin,
+  MessageSquare,
   Phone,
   RefreshCw,
   ShoppingBag,
@@ -115,6 +116,14 @@ export default function BuyurtmalarPage() {
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all')
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [statusHint, setStatusHint] = useState<string | null>(null)
+  const [messageOrder, setMessageOrder] = useState<OrderRow | null>(null)
+  const [msgTitle, setMsgTitle] = useState('')
+  const [msgBody, setMsgBody] = useState('')
+  const [msgSending, setMsgSending] = useState(false)
+  const [msgFeedback, setMsgFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  )
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!supabase) return
@@ -145,7 +154,69 @@ export default function BuyurtmalarPage() {
       setError(e.message)
       return
     }
+    setStatusHint('Holat yangilandi — mijozga bildirishnoma yuborildi.')
+    window.setTimeout(() => setStatusHint(null), 4000)
     void load({ silent: true })
+  }
+
+  async function saveTracking(
+    id: string,
+    fields: { tracking_number: string; tracking_url: string; carrier: string },
+  ) {
+    if (!supabase) return
+    const { error: e } = await supabase
+      .from('orders')
+      .update({
+        tracking_number: fields.tracking_number.trim() || null,
+        tracking_url: fields.tracking_url.trim() || null,
+        carrier: fields.carrier.trim() || null,
+      })
+      .eq('id', id)
+    if (e) {
+      setError(e.message)
+      return
+    }
+    setStatusHint('Tracking saqlandi.')
+    window.setTimeout(() => setStatusHint(null), 4000)
+    void load({ silent: true })
+  }
+
+  function openOrderMessage(order: OrderRow) {
+    setMessageOrder(order)
+    setMsgTitle(`Buyurtma #${shortOrderId(order.id)}`)
+    setMsgBody('')
+    setMsgFeedback(null)
+  }
+
+  function closeOrderMessage() {
+    setMessageOrder(null)
+    setMsgTitle('')
+    setMsgBody('')
+    setMsgFeedback(null)
+  }
+
+  async function sendOrderMessage() {
+    if (!supabase || !messageOrder) return
+    if (!msgTitle.trim() || !msgBody.trim()) {
+      setMsgFeedback({ type: 'error', text: "Sarlavha va matnni to'ldiring" })
+      return
+    }
+    setMsgSending(true)
+    setMsgFeedback(null)
+    const { error: e } = await supabase.from('user_notifications').insert({
+      user_id: messageOrder.user_id,
+      title: msgTitle.trim(),
+      body: msgBody.trim(),
+      type: 'message',
+      order_id: messageOrder.id,
+    })
+    setMsgSending(false)
+    if (e) {
+      setMsgFeedback({ type: 'error', text: e.message })
+      return
+    }
+    setMsgFeedback({ type: 'success', text: 'Xabar mijozga yuborildi!' })
+    window.setTimeout(() => closeOrderMessage(), 1200)
   }
 
   const filtered = useMemo(() => {
@@ -194,6 +265,9 @@ export default function BuyurtmalarPage() {
                 <span className="font-semibold text-gray-700">{filtered.length} ta</span>
               </>
             ) : null}
+            <span className="mt-1 block text-xs text-gray-400">
+              Status o‘zgarganda mijoz ilovasiga avtomatik bildirishnoma yuboriladi.
+            </span>
           </div>
         </div>
         <button
@@ -210,6 +284,12 @@ export default function BuyurtmalarPage() {
       {error && (
         <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800 ring-1 ring-rose-200">
           {error}
+        </div>
+      )}
+
+      {statusHint && (
+        <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800 ring-1 ring-emerald-200">
+          {statusHint}
         </div>
       )}
 
@@ -264,8 +344,63 @@ export default function BuyurtmalarPage() {
               expanded={expanded.has(o.id)}
               onToggle={() => toggleExpanded(o.id)}
               onStatusChange={(s) => void setStatus(o.id, s)}
+              onSaveTracking={(fields) => void saveTracking(o.id, fields)}
+              onMessage={() => openOrderMessage(o)}
             />
           ))}
+        </div>
+      )}
+
+      {messageOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-bold text-gray-900">Mijozga xabar</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Buyurtma #{shortOrderId(messageOrder.id)} · {messageOrder.full_name || '—'}
+            </p>
+            <div className="mt-4 grid gap-3">
+              <input
+                className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-[rgb(var(--primary))]"
+                placeholder="Sarlavha"
+                value={msgTitle}
+                onChange={(e) => setMsgTitle(e.target.value)}
+              />
+              <textarea
+                className="min-h-[120px] w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[rgb(var(--primary))]"
+                placeholder="Xabar matni"
+                value={msgBody}
+                onChange={(e) => setMsgBody(e.target.value)}
+              />
+              {msgFeedback && (
+                <div
+                  className={`rounded-xl px-3 py-2 text-sm ${
+                    msgFeedback.type === 'success'
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-red-100 text-red-800'
+                  }`}
+                >
+                  {msgFeedback.text}
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeOrderMessage}
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Bekor qilish
+              </button>
+              <button
+                type="button"
+                disabled={msgSending}
+                onClick={() => void sendOrderMessage()}
+                className="rounded-xl bg-[rgb(var(--primary))] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-60"
+              >
+                {msgSending ? 'Yuborilmoqda…' : 'Yuborish'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -277,12 +412,24 @@ function OrderCard({
   expanded,
   onToggle,
   onStatusChange,
+  onSaveTracking,
+  onMessage,
 }: {
   order: OrderRow
   expanded: boolean
   onToggle: () => void
   onStatusChange: (s: OrderStatus) => void
+  onSaveTracking: (fields: {
+    tracking_number: string
+    tracking_url: string
+    carrier: string
+  }) => void
+  onMessage: () => void
 }) {
+  const [trackingNumber, setTrackingNumber] = useState(order.tracking_number ?? '')
+  const [trackingUrl, setTrackingUrl] = useState(order.tracking_url ?? '')
+  const [carrier, setCarrier] = useState(order.carrier ?? '')
+
   const items = useMemo(() => parseItems(order.items), [order.items])
   const status = STATUS_MAP.get(order.status) ?? STATUSES[0]
   const pay = paymentInfo(order)
@@ -424,12 +571,61 @@ function OrderCard({
         </div>
       </div>
 
+      {(order.status === 'delivering' || order.status === 'delivered' || order.tracking_number) && (
+        <div className="space-y-2 border-t border-gray-100 px-5 py-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            📦 Tracking
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <input
+              value={carrier}
+              onChange={(e) => setCarrier(e.target.value)}
+              placeholder="Kuryer / pochta"
+              className="h-9 rounded-lg border border-gray-200 px-2 text-xs"
+            />
+            <input
+              value={trackingNumber}
+              onChange={(e) => setTrackingNumber(e.target.value)}
+              placeholder="Tracking raqam"
+              className="h-9 rounded-lg border border-gray-200 px-2 text-xs"
+            />
+            <input
+              value={trackingUrl}
+              onChange={(e) => setTrackingUrl(e.target.value)}
+              placeholder="Tracking havola (ixtiyoriy)"
+              className="h-9 rounded-lg border border-gray-200 px-2 text-xs"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onSaveTracking({
+                tracking_number: trackingNumber,
+                tracking_url: trackingUrl,
+                carrier,
+              })
+            }
+            className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800"
+          >
+            Trackingni saqlash
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-5 py-3">
         <div className="text-xs text-gray-500">
           🕐 {dt ? format(dt, 'dd.MM.yyyy HH:mm') : '—'}
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">Statusni o‘zgartirish:</label>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onMessage}
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            Xabar
+          </button>
+          <label className="text-xs text-gray-500">Status:</label>
           <select
             value={order.status}
             onChange={(e) => onStatusChange(e.target.value as OrderStatus)}

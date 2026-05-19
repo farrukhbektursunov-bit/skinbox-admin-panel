@@ -112,6 +112,8 @@ const emptyForm = {
   rating: '',
   stock_quantity: '0',
   in_stock: true,
+  is_import_on_order: false,
+  estimated_delivery_days: '',
 }
 
 function formatMoney(n: number) {
@@ -376,6 +378,9 @@ export default function MahsulotlarPage() {
       rating: p.rating != null ? String(p.rating) : '',
       stock_quantity: String(p.stock_quantity ?? 0),
       in_stock: p.in_stock ?? true,
+      is_import_on_order: p.is_import_on_order ?? false,
+      estimated_delivery_days:
+        p.estimated_delivery_days != null ? String(p.estimated_delivery_days) : '',
     })
     setModalOpen(true)
   }
@@ -425,6 +430,15 @@ export default function MahsulotlarPage() {
       return
     }
     const stockQty = Math.max(0, Math.floor(parsedStock))
+    const isImport = form.is_import_on_order
+    const rawDelivery = form.estimated_delivery_days.trim()
+    const parsedDelivery = rawDelivery === '' ? null : Number(rawDelivery)
+    if (isImport) {
+      if (rawDelivery === '' || !Number.isFinite(parsedDelivery) || parsedDelivery < 1) {
+        setError('Chet eldan keltirish uchun taxminiy yetkazish kunini kiriting (kamida 1)')
+        return
+      }
+    }
 
     setSaving(true)
     setError(null)
@@ -440,7 +454,11 @@ export default function MahsulotlarPage() {
       category: form.category || null,
       rating,
       stock_quantity: stockQty,
-      in_stock: stockQty > 0 && form.in_stock,
+      in_stock: (isImport || stockQty > 0) && form.in_stock,
+      is_import_on_order: isImport,
+      estimated_delivery_days: isImport
+        ? Math.max(1, Math.floor(parsedDelivery ?? 0))
+        : null,
     }
     const payload =
       descriptionColumn === 'desc'
@@ -947,6 +965,39 @@ export default function MahsulotlarPage() {
                   Katalogda ko‘rsatish (0 dona bo‘lsa avtomatik o‘chadi)
                 </span>
               </label>
+              <label className="flex min-w-0 items-start gap-2 text-sm text-gray-800 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={form.is_import_on_order}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      is_import_on_order: e.target.checked,
+                      estimated_delivery_days: e.target.checked ? f.estimated_delivery_days : '',
+                    }))
+                  }
+                />
+                <span className="min-w-0 leading-snug">
+                  Buyurtma asosida chet eldan keltiriladi (ombordan ayirilmaydi)
+                </span>
+              </label>
+              {form.is_import_on_order ? (
+                <label className="min-w-0 text-xs font-medium text-gray-600 sm:col-span-2">
+                  Taxminiy yetkazish muddati (ish kuni) *
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={form.estimated_delivery_days}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, estimated_delivery_days: e.target.value }))
+                    }
+                    className="mt-1 h-10 w-full min-w-0 max-w-full rounded-xl border border-gray-200 px-3 text-sm"
+                    placeholder="Masalan: 14"
+                  />
+                </label>
+              ) : null}
             </div>
             <div className="mt-6 flex min-w-0 flex-wrap justify-end gap-2">
               <button

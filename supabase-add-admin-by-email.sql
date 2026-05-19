@@ -16,7 +16,7 @@
 
 do $$
 declare
-  admin_email text := 'admin@example.com';  -- ← BU YERNI O'ZGARTIRING
+  admin_email text := 'skinbox.uz@gmail.com';
   uid uuid;
   disp_name text;
 begin
