@@ -8,6 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+# Ichki Next.js shablon (alohida git, keraksiz submodule)
+admin-panel/
 dist
 dist-ssr
 *.local
